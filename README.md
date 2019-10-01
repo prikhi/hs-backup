@@ -1,9 +1,9 @@
 # hs-backup
 
-A service to backup off-server files with interruption handling and archive
+A service to backup remote files with interruption handling and archive
 management.
 
-This will use rsync to backup remote folders on an hourly, dialy, monthly, &
+This will use rsync to backup remote folders on an hourly, daily, monthly, &
 yearly basis.
 
 ```

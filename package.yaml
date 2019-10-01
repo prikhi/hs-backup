@@ -21,12 +21,34 @@ category:
 
 extra-source-files:
   - README.md
+  - LICENSE
+
+ghc-options:
+  - -Wall
+  - -Wcompat
+  - -Wincomplete-record-updates
+  - -Wincomplete-uni-patterns
+  - -Wredundant-constraints
 
 dependencies:
   - base >= 4.7 && < 5
 
 library:
   source-dirs: src
+  dependencies:
+    - bytestring
+    - cereal
+    - cereal-text
+    - cereal-time
+    - directory
+    - filepath
+    - lifted-async
+    - mtl
+    - safe-exceptions
+    - stm
+    - text
+    - time
+    - typed-process
 
 executables:
   hs-backup:

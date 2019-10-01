@@ -1,5 +1,4 @@
 module Main where
 
 main :: IO ()
-main = do
-  putStrLn "hello world"
+main = putStrLn "TODO: build config from YAML file & start service"
