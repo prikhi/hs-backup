@@ -1,5 +1,7 @@
 # hs-backup
 
+[![hs-backup Build Status](https://travis-ci.org/prikhi/hs-backup.svg?branch=master)](https://travis-ci.org/prikhi/hs-backup)
+
 A service to backup remote files with interruption handling and archive
 management.
 
