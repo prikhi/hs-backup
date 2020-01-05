@@ -113,8 +113,6 @@ data AppState
 
 -- | Try to read the statefile. If an error occurs while decoding the file,
 -- sync all the backups available.
---
--- TODO: Remove enqueued backups no longer in [Backup] from state?
 initializeState :: MonadIO m => [Backup] -> FilePath -> m (TVar AppState)
 initializeState backups stateFile = do
     stateExists <- liftIO $ doesFileExist stateFile
@@ -123,7 +121,7 @@ initializeState backups stateFile = do
             Left err -> do
                 liftIO $ putStrLn $ "Error Decoding Application State: " <> err
                 makeInitialState
-            Right st -> liftIO $ newTVarIO st
+            Right st -> liftIO $ newTVarIO $ removeOldBackups st
         else makeInitialState
   where
     -- Build & save an initial AppState from the Backups.
@@ -133,6 +131,15 @@ initializeState backups stateFile = do
         let s = SyncInProgress $ SyncState time $ getAllBackups backups
         liftIO . BS.writeFile stateFile $ encode s
         liftIO $ newTVarIO s
+    -- Remove any enqueued Backups that are no longer in the list of
+    -- Backups to make.
+    removeOldBackups :: AppState -> AppState
+    removeOldBackups = \case
+        s@(Synced _)             -> s
+        SyncInProgress syncState -> SyncInProgress $ syncState
+            { ssQueue = filter (\(backup, _) -> backup `elem` backups)
+                            $ ssQueue syncState
+            }
 
 
 -- | Sync the next queued backup or wait 5 minutes if the queue if empty.
