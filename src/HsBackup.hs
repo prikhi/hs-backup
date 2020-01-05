@@ -456,7 +456,7 @@ runRsync
     -> BackupRate
     -> m ExitCode
 runRsync backup@Backup {..} time rate = do
-    maybeLinkDest <- getLinkDestination backup rate
+    maybeLinkDest <- getLinkDestination backup time rate
     path          <- getBackupPath bName rate time
     let
         rsync = proc "rsync" $ catMaybes
@@ -480,11 +480,13 @@ sshOptions Backup {..} = "ssh -i " <> bIdentityFile <> " -l " <> T.unpack bUser
 getLinkDestination
     :: (MonadReader Config m, MonadIO m)
     => Backup
+    -> ZonedTime
     -> BackupRate
     -> m (Maybe FilePath)
-getLinkDestination backup rate = do
+getLinkDestination backup time rate = do
     parentPath <- getParentPath backup rate
-    siblings   <- liftIO $ listDirectory parentPath
+    let backupFolder = getDateFolder time rate
+    siblings <- liftIO $ filter (/= backupFolder) <$> listDirectory parentPath
     return . listToMaybe . L.reverse $ L.sort siblings
 
 -- | Get the parent path for a specific Backup & BackupRate. E.g.,
