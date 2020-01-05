@@ -9,6 +9,13 @@
 TODO:
     * Logging errors & normal output to files
     * Config file parsing
+    * Monthly & Yearly backups using `cp -alr` on Daily if present
+    * More configuration options:
+        * Backup folder format strings
+        * BackupRate folder names
+        * Maximum backups to retain
+        * Delay time for checking for backups
+
 -}
 module HsBackup
     ( run
@@ -119,6 +126,7 @@ initializeState backups stateFile = do
             Right st -> liftIO $ newTVarIO st
         else makeInitialState
   where
+    -- Build & save an initial AppState from the Backups.
     makeInitialState :: MonadIO m => m (TVar AppState)
     makeInitialState = do
         time <- liftIO getZonedTime
@@ -214,7 +222,8 @@ data SyncState
         , ssQueue :: [(Backup, BackupRate)]
         -- ^ A queue of backups to make. The first item is the currently
         -- synced one.
-        -- TODO: Non-Empty queue only?
+        -- TODO: Non-Empty queue only? How would that work when we've
+        -- finished processing?
         } deriving (Show, Read, Generic, Serialize)
 
 -- | Data required for making a backup of a remote location.
