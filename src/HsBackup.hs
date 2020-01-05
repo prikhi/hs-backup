@@ -8,7 +8,6 @@
 {-|
 TODO:
     * Config file parsing
-    * Monthly & Yearly backups using `cp -alr` on Daily if present
     * Cleanly handle SIGTERM
     * More configuration options:
         * Backup folder format strings
@@ -374,7 +373,6 @@ runBackupUntilComplete a@(b, br) time = runBackup b time br >>= \case
 
 
 -- Running a single backup
--- TODO: Run monthly & yearly by `cp -alr` on Daily or Hourly.
 runBackup
     :: (MonadReader Config m, MonadIO m, MonadCatch m)
     => Backup
@@ -388,15 +386,38 @@ runBackup backup time rate = try $ do
         <> T.unpack (bName backup)
         <> " - "
         <> rateToFolderName rate
-    backupPath <- rsyncWithRetry
+    backupPath <- makeBackup
     touchWithRetry backupPath
     deleteOverflow backup rate
     return backupPath
   where
+    -- Copy backups if an existing backup from a different rate is
+    -- available, otherwise make a backup with rsync.
+    makeBackup :: (MonadReader Config m, MonadIO m) => m FilePath
+    makeBackup = case rate of
+        BackupHourly -> rsyncWithRetry
+        BackupDaily  -> if bEnableHourly backup
+            then cpIfBackupAvailable BackupHourly
+            else rsyncWithRetry
+        BackupMonthly -> cpIfBackupAvailable BackupDaily
+        BackupYearly  -> cpIfBackupAvailable BackupMonthly
+    cpIfBackupAvailable
+        :: (MonadReader Config m, MonadIO m) => BackupRate -> m FilePath
+    cpIfBackupAvailable sourceRate = do
+        sourceParentPath <- getParentPath backup sourceRate
+        sourceFolders    <- liftIO $ listDirectory sourceParentPath
+        let lastSourceFolder = listToMaybe . L.reverse $ L.sort sourceFolders
+        case lastSourceFolder of
+            Nothing         -> rsyncWithRetry
+            Just folderName -> cpWithRetry $ sourceParentPath </> folderName
     rsyncWithRetry :: (MonadReader Config m, MonadIO m) => m FilePath
     rsyncWithRetry =
         untilSuccess "rsync" (getBackupPath (bName backup) rate time)
             $ runRsync backup time rate
+    cpWithRetry :: (MonadReader Config m, MonadIO m) => FilePath -> m FilePath
+    cpWithRetry source =
+        untilSuccess "cp" (getBackupPath (bName backup) rate time)
+            $ runCp source backup time rate
     touchWithRetry :: (MonadReader Config m, MonadIO m) => FilePath -> m ()
     touchWithRetry = untilSuccess "touch" (return ()) . updateModifiedTime
     untilSuccess
@@ -443,6 +464,23 @@ deletePath :: (MonadReader Config m, MonadIO m) => FilePath -> m ()
 deletePath path = do
     logMsg . toLogStr $ "Removing Old Backup: " <> path
     liftIO $ removePathForcibly path
+
+
+-- | Make a backup using a source directory & the @cp@ command.
+--
+-- The @-l@ flag will be passed to @cp@, which creates hardlinks between
+-- files instead of copying them in order to conserve disk space.
+runCp
+    :: (MonadReader Config m, MonadIO m)
+    => FilePath
+    -> Backup
+    -> ZonedTime
+    -> BackupRate
+    -> m ExitCode
+runCp sourceDirectory Backup {..} time rate = do
+    backupDestination <- getBackupPath bName rate time
+    let cp = proc "cp" ["-al", sourceDirectory, backupDestination]
+    runProcess $ setStdin closed cp
 
 
 -- | Make a backup using the @rsync@ command.
