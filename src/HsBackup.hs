@@ -9,6 +9,7 @@
 TODO:
     * Config file parsing
     * Monthly & Yearly backups using `cp -alr` on Daily if present
+    * Cleanly handle SIGTERM
     * More configuration options:
         * Backup folder format strings
         * BackupRate folder names
@@ -244,7 +245,7 @@ calculateBackups backups lastTime newTime = concat
         then map (, BackupMonthly) backups
         else []
     yearly = if dayChange && zonedDay newTime == 1 && zonedMonth newTime == 1
-        then map (, BackupYearly) backups
+        then map (, BackupYearly) $ filter bEnableYearly backups
         else []
 
 
