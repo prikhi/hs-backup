@@ -432,7 +432,7 @@ deleteOverflow
     :: (MonadReader Config m, MonadIO m) => Backup -> BackupRate -> m ()
 deleteOverflow backup rate = do
     parentPath <- getParentPath backup rate
-    backups    <- liftIO $ listDirectory parentPath
+    backups    <- liftIO $ L.sort <$> listDirectory parentPath
     let lastBackup = listToMaybe backups
     when (length backups > maximumBackups rate) $ do
         sequence_ (deletePath <$> lastBackup)
