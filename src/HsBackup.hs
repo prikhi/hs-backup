@@ -7,7 +7,6 @@
 {-# LANGUAGE TupleSections #-}
 {-|
 TODO:
-    * Logging errors & normal output to files
     * Config file parsing
     * Monthly & Yearly backups using `cp -alr` on Daily if present
     * More configuration options:
@@ -80,20 +79,38 @@ import           System.Directory               ( listDirectory
                                                 )
 import           System.FilePath.Posix          ( (</>) )
 import           System.Exit                    ( ExitCode(..) )
+import           System.Log.FastLogger          ( TimedFastLogger
+                                                , LogStr
+                                                , toLogStr
+                                                , FormattedTime
+                                                , newTimeCache
+                                                , simpleTimeFormat
+                                                , FileLogSpec(..)
+                                                , LogType(..)
+                                                , newTimedFastLogger
+                                                , defaultBufSize
+                                                )
 
 import qualified Data.ByteString               as BS
 import qualified Data.List                     as L
 import qualified Data.Text                     as T
 
 
+-- | Start a thread that enqueues new Backups and a thread that processes
+-- the queue by syncing the backups.
+--
 -- Read config file instead of passing as args
-run :: [Backup] -> FilePath -> FilePath -> IO ()
-run backups basePath stateFile = do
-    state <- initializeState backups stateFile
-    let cfg = Config backups basePath stateFile state
+run :: [Backup] -> FilePath -> FilePath -> FilePath -> IO ()
+run backups basePath stateFile logFile = do
+    timeCache               <- newTimeCache simpleTimeFormat
+    (logger, cleanupLogger) <- newTimedFastLogger timeCache
+        $ LogFile (FileLogSpec logFile (1024 * 1024 * 50) 5) defaultBufSize
+    state <- initializeState backups stateFile logger
+    let cfg = Config backups basePath stateFile state logger
     syncer   <- async $ runReaderT syncBackups cfg
     enqueuer <- async $ runReaderT enqueueBackups cfg
     void $ waitBoth syncer enqueuer
+    cleanupLogger
 
 
 -- | Configuration data for the program.
@@ -103,7 +120,19 @@ data Config
         , cfgBackupBaseDir :: FilePath
         , cfgStateFile :: FilePath
         , cfgState :: TVar AppState
+        , cfgLogger :: TimedFastLogger
         }
+
+-- | Log a message to the log file.
+logMsg :: (MonadReader Config m, MonadIO m) => LogStr -> m ()
+logMsg msg = do
+    logger <- asks cfgLogger
+    liftIO $ logger $ logMsg_ msg
+
+-- | Helper for building log strings. Used by 'logMsg' but can also be used
+-- to log messages in non-MonadReader contexts.
+logMsg_ :: LogStr -> FormattedTime -> LogStr
+logMsg_ msg time = "[" <> toLogStr (show time) <> "]: " <> msg <> "\n"
 
 -- | The current status of the application - either Syncing or Synced.
 data AppState
@@ -113,24 +142,34 @@ data AppState
 
 -- | Try to read the statefile. If an error occurs while decoding the file,
 -- sync all the backups available.
-initializeState :: MonadIO m => [Backup] -> FilePath -> m (TVar AppState)
-initializeState backups stateFile = do
+initializeState
+    :: MonadIO m => [Backup] -> FilePath -> TimedFastLogger -> m (TVar AppState)
+initializeState backups stateFile logger = do
+    liftIO . logger $ logMsg_ "Initializing Application State"
     stateExists <- liftIO $ doesFileExist stateFile
     if stateExists
         then liftIO (BS.readFile stateFile) >>= \c -> case decode c of
             Left err -> do
-                liftIO $ putStrLn $ "Error Decoding Application State: " <> err
+                liftIO
+                    .  logger
+                    .  logMsg_
+                    .  toLogStr
+                    $  "Error Decoding Application State: "
+                    <> err
                 makeInitialState
-            Right st -> liftIO $ newTVarIO $ removeOldBackups st
+            Right st -> liftIO $ do
+                logger $ logMsg_ "Initialized State From File"
+                newTVarIO $ removeOldBackups st
         else makeInitialState
   where
     -- Build & save an initial AppState from the Backups.
     makeInitialState :: MonadIO m => m (TVar AppState)
-    makeInitialState = do
-        time <- liftIO getZonedTime
+    makeInitialState = liftIO $ do
+        time <- getZonedTime
         let s = SyncInProgress $ SyncState time $ getAllBackups backups
-        liftIO . BS.writeFile stateFile $ encode s
-        liftIO $ newTVarIO s
+        BS.writeFile stateFile $ encode s
+        logger $ logMsg_ "Created New Application State"
+        newTVarIO s
     -- Remove any enqueued Backups that are no longer in the list of
     -- Backups to make.
     removeOldBackups :: AppState -> AppState
@@ -312,17 +351,25 @@ runBackupUntilComplete
     -> m ()
 runBackupUntilComplete a@(b, br) time = runBackup b time br >>= \case
     Left err -> do
-        liftIO $ putStrLn $ "IO Exception: " <> show err
-        liftIO $ putStrLn "Retrying in 30 seconds."
+        logMsg
+            .  toLogStr
+            $  "Encountered IO Exception for "
+            <> T.unpack (bName b)
+            <> " "
+            <> rateToFolderName br
+            <> ": "
+            <> show err
+        logMsg "Retrying in 30 Seconds"
         liftIO $ threadDelay $ 1000000 * 30
         runBackupUntilComplete a time
     Right _ ->
-        liftIO
-            $  putStrLn
-            $  "Backup Completed: "
+        logMsg
+            .  toLogStr
+            $  "Backup of "
             <> T.unpack (bName b)
-            <> " - "
+            <> " "
             <> rateToFolderName br
+            <> " Completed Successfully"
 
 
 -- Running a single backup
@@ -334,6 +381,12 @@ runBackup
     -> BackupRate
     -> m (Either IOException FilePath)
 runBackup backup time rate = try $ do
+    logMsg
+        .  toLogStr
+        $  "Starting Backup of "
+        <> T.unpack (bName backup)
+        <> " - "
+        <> rateToFolderName rate
     backupPath <- rsyncWithRetry
     touchWithRetry backupPath
     deleteOverflow backup rate
@@ -343,13 +396,27 @@ runBackup backup time rate = try $ do
     rsyncWithRetry =
         untilSuccess "rsync" (getBackupPath (bName backup) rate time)
             $ runRsync backup time rate
-    touchWithRetry :: MonadIO m => FilePath -> m ()
+    touchWithRetry :: (MonadReader Config m, MonadIO m) => FilePath -> m ()
     touchWithRetry = untilSuccess "touch" (return ()) . updateModifiedTime
-    untilSuccess :: MonadIO m => String -> m a -> m ExitCode -> m a
+    untilSuccess
+        :: (MonadReader Config m, MonadIO m)
+        => String
+        -> m a
+        -> m ExitCode
+        -> m a
     untilSuccess name postAction runner = runner >>= \case
         ExitSuccess      -> postAction
         ExitFailure code -> do
-            liftIO $ putStrLn $ name <> " exited with code: " <> show code
+            logMsg
+                .  toLogStr
+                $  "While syncing "
+                <> T.unpack (bName backup)
+                <> " "
+                <> rateToFolderName rate
+                <> ", "
+                <> name
+                <> " exited with code: "
+                <> show code
             untilSuccess name postAction runner
 
 -- | Set the modified time of a path to now by running the @touch@ command
@@ -371,8 +438,10 @@ deleteOverflow backup rate = do
         deleteOverflow backup rate
 
 -- | Forcible remove the given path.
-deletePath :: MonadIO m => FilePath -> m ()
-deletePath = liftIO . removePathForcibly
+deletePath :: (MonadReader Config m, MonadIO m) => FilePath -> m ()
+deletePath path = do
+    logMsg . toLogStr $ "Removing Old Backup: " <> path
+    liftIO $ removePathForcibly path
 
 
 -- | Make a backup using the @rsync@ command.

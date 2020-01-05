@@ -41,6 +41,7 @@ library:
     - cereal-text
     - cereal-time
     - directory
+    - fast-logger
     - filepath
     - lifted-async
     - mtl
