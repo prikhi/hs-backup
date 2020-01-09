@@ -132,7 +132,7 @@ logMsg msg = do
 -- | Helper for building log strings. Used by 'logMsg' but can also be used
 -- to log messages in non-MonadReader contexts.
 logMsg_ :: LogStr -> FormattedTime -> LogStr
-logMsg_ msg time = "[" <> toLogStr (show time) <> "]: " <> msg <> "\n"
+logMsg_ msg time = "[" <> toLogStr time <> "]: " <> msg <> "\n"
 
 -- | The current status of the application - either Syncing or Synced.
 data AppState
