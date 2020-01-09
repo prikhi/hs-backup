@@ -22,7 +22,7 @@ You can build & install the service using [stack][stack]:
 stack install
 ```
 
-This will put the `hs-backup` in your `~/.local/share/` folder.
+This will put the `hs-backup` executable in your `~/.local/share/` folder.
 
 
 Developers working on `hs-backup` probably want to start a file-watching build
