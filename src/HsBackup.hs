@@ -439,6 +439,8 @@ runBackup backup time rate = try $ do
                 <> name
                 <> " exited with code: "
                 <> show code
+            logMsg "Retrying in 30 Seconds"
+            liftIO $ threadDelay $ 1000000 * 30
             untilSuccess name postAction runner
 
 -- | Set the modified time of a path to now by running the @touch@ command
