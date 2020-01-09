@@ -25,8 +25,8 @@ stack install
 This will put the `hs-backup` in your `~/.local/share/` folder.
 
 
-Developers working on `hs-backup`, you will probably want to start a
-file-watching build server:
+Developers working on `hs-backup` probably want to start a file-watching build
+server:
 
 ```
 stack build --pedantic --file-watch --fast
