@@ -29,6 +29,7 @@ ghc-options:
   - -Wincomplete-record-updates
   - -Wincomplete-uni-patterns
   - -Wredundant-constraints
+  - -O2
 
 dependencies:
   - base >= 4.7 && < 5
@@ -60,3 +61,7 @@ executables:
     dependencies:
       - hs-backup
       - cmdargs
+    ghc-options:
+      - -O2
+      - -threaded
+      - -with-rtsopts="-N"
