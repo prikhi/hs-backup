@@ -36,6 +36,7 @@ dependencies:
 library:
   source-dirs: src
   dependencies:
+    - aeson
     - bytestring
     - cereal
     - cereal-text
@@ -50,6 +51,7 @@ library:
     - text
     - time
     - typed-process
+    - yaml
 
 executables:
   hs-backup:

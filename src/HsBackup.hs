@@ -2,22 +2,25 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 {-|
 TODO:
-    * Config file parsing
-    * Cleanly handle SIGTERM
+    * Cleanly handle SIGTERM - persist state, stop backup & child threads
     * More configuration options:
         * Backup folder format strings
         * BackupRate folder names
         * Maximum backups to retain
         * Delay time for checking for backups
+    * Log stderr/stdout of command when they error out
 
 -}
 module HsBackup
-    ( run
+    ( readConfigFile
+    , run
+    , ConfigSpec(..)
     , Config(..)
     , Backup(..)
     )
@@ -38,6 +41,7 @@ import           Control.Monad                  ( when
                                                 , void
                                                 , sequence_
                                                 , forever
+                                                , forM_
                                                 )
 import           Control.Exception.Safe         ( MonadCatch
                                                 , IOException
@@ -50,7 +54,13 @@ import           Control.Monad.Reader           ( MonadReader
                                                 , asks
                                                 , runReaderT
                                                 )
+import           Data.Aeson                     ( (.:)
+                                                , (.:?)
+                                                , FromJSON(..)
+                                                , withObject
+                                                )
 import           Data.Maybe                     ( catMaybes
+                                                , fromMaybe
                                                 , listToMaybe
                                                 )
 import           Data.Serialize                 ( Serialize
@@ -67,24 +77,36 @@ import           Data.Time                      ( ZonedTime(..)
                                                 , formatTime
                                                 )
 import           Data.Time.LocalTime.Serialize  ( )
+import           Data.Yaml.Config               ( loadYamlSettings
+                                                , ignoreEnv
+                                                )
 import           GHC.Generics                   ( Generic )
 import           System.Process.Typed           ( proc
                                                 , setStdin
+                                                , setStdout
                                                 , runProcess
                                                 , closed
                                                 )
 import           System.Directory               ( listDirectory
                                                 , removePathForcibly
                                                 , doesFileExist
+                                                , doesPathExist
+                                                , getPermissions
+                                                , Permissions
+                                                , writable
+                                                , readable
+                                                , getTemporaryDirectory
+                                                , createDirectoryIfMissing
                                                 )
-import           System.FilePath.Posix          ( (</>) )
 import           System.Exit                    ( ExitCode(..) )
+import           System.FilePath.Posix          ( (</>)
+                                                , takeDirectory
+                                                )
 import           System.Log.FastLogger          ( TimedFastLogger
                                                 , LogStr
                                                 , toLogStr
                                                 , FormattedTime
                                                 , newTimeCache
-                                                , simpleTimeFormat
                                                 , FileLogSpec(..)
                                                 , LogType(..)
                                                 , newTimedFastLogger
@@ -96,24 +118,104 @@ import qualified Data.List                     as L
 import qualified Data.Text                     as T
 
 
+-- | Parse the program configuration from the given paths.
+readConfigFile :: [FilePath] -> IO ConfigSpec
+readConfigFile paths = loadYamlSettings paths [] ignoreEnv
+
+-- | The configuration data parsed from the configuratin file.
+data ConfigSpec =
+    ConfigSpec
+        { csBackups :: [Backup]
+        , csBackupPath :: FilePath
+        , csStatePath :: FilePath
+        , csLogFile :: Maybe FilePath
+        }
+
+instance FromJSON ConfigSpec where
+    parseJSON = withObject "ConfigSpec" $ \v -> do
+        csBackups    <- v .: "backups"
+        csBackupPath <- v .: "backup-folder"
+        csStatePath  <- v .: "state-file"
+        csLogFile    <- v .: "log-file"
+        return ConfigSpec { .. }
+
+
 -- | Start a thread that enqueues new Backups and a thread that processes
 -- the queue by syncing the backups.
 --
 -- Read config file instead of passing as args
-run :: [Backup] -> FilePath -> FilePath -> FilePath -> IO ()
-run backups basePath stateFile logFile = do
-    timeCache               <- newTimeCache simpleTimeFormat
-    (logger, cleanupLogger) <- newTimedFastLogger timeCache
-        $ LogFile (FileLogSpec logFile (1024 * 1024 * 50) 5) defaultBufSize
-    state <- initializeState backups stateFile logger
-    let cfg = Config backups basePath stateFile state logger
+run :: ConfigSpec -> IO ()
+run spec@ConfigSpec { csBackups, csBackupPath, csStatePath } = do
+    (logger, cleanupLogger) <- makeLogger
+    createBackupFolders
+    statePath <- checkStatePath logger
+    state     <- initializeState csBackups statePath logger
+    let cfg = Config csBackups csBackupPath statePath state logger
     syncer   <- async $ runReaderT syncBackups cfg
     enqueuer <- async $ runReaderT enqueueBackups cfg
     void $ waitBoth syncer enqueuer
     cleanupLogger
+  where
+    -- Build the application logger. If no path exists in the
+    -- configuration, log to stdout. If the path exists but we cannot write
+    -- to it, log to stdout. Otherwise use the specified path for the log
+    -- output.
+    makeLogger :: IO (TimedFastLogger, IO ())
+    makeLogger = do
+        timeCache <- newTimeCache "%Y-%m-%dT%T"
+        newTimedFastLogger timeCache =<< case csLogFile spec of
+            Nothing       -> return $ LogStdout defaultBufSize
+            Just filePath -> do
+                permissions <- getFilePermissions filePath
+                if writable permissions
+                    then return $ LogFile
+                        (FileLogSpec filePath (1024 * 1024 * 50) 5)
+                        defaultBufSize
+                    else do
+                        putStrLn
+                            $  "Warning: Can not write to log file at "
+                            <> filePath
+                            <> ", logging to stdout instead"
+                        return $ LogStdout defaultBufSize
+    -- Ensure all the @<backup>/<rate>@ folders are created.
+    createBackupFolders :: IO ()
+    createBackupFolders = do
+        let backups = getAllBackups csBackups
+        forM_ backups $ \(backup, rate) ->
+            createDirectoryIfMissing True
+                $   csBackupPath
+                </> T.unpack (bName backup)
+                </> rateToFolderName rate
+    -- Check the read & write permissions for the state file, issuing
+    -- a warning & using a temporary file if we cannot read or write to the
+    -- given path.
+    checkStatePath :: TimedFastLogger -> IO FilePath
+    checkStatePath logger = do
+        permissions <- liftIO $ getFilePermissions csStatePath
+        if writable permissions && readable permissions
+            then do
+                createDirectoryIfMissing True $ takeDirectory csStatePath
+                return csStatePath
+            else do
+                logger
+                    .  logMsg_
+                    .  toLogStr
+                    $  "Warning: Could not read/write state file at "
+                    <> csStatePath
+                    <> ", backup status will not be persisted across program restarts."
+                tempDir <- getTemporaryDirectory
+                return $ tempDir </> "hs-backup.state"
+    -- Try fetching the file permissions for a given path, recursively
+    -- ascending the directory tree until we find a path that exists.
+    getFilePermissions :: FilePath -> IO Permissions
+    getFilePermissions filePath = do
+        exists <- doesPathExist filePath
+        if exists
+            then getPermissions filePath
+            else getFilePermissions $ takeDirectory filePath
 
 
--- | Configuration data for the program.
+-- | The configuration environment used by the enqueuing & syncing threads.
 data Config
     = Config
         { cfgBackups :: [Backup]
@@ -293,6 +395,19 @@ data Backup
         , bBandwidthLimit :: Maybe Integer
         -- ^ Limit the bandwidth used to make backups.
         } deriving (Show, Read, Eq, Generic, Serialize)
+
+instance FromJSON Backup where
+    parseJSON = withObject "Backup" $ \v -> do
+        bName           <- v .: "name"
+        bServer         <- v .: "server"
+        bUser           <- v .: "user"
+        bPath           <- v .: "path"
+        bIdentityFile   <- v .: "identity-file"
+        bEnableHourly   <- fromMaybe False <$> v .:? "hourly"
+        bEnableYearly   <- fromMaybe False <$> v .:? "yearly"
+        bBandwidthLimit <- v .:? "bandwidth-limit"
+        return Backup { .. }
+
 
 -- | The different rates at which backups are taken.
 data BackupRate
