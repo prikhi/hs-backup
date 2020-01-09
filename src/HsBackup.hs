@@ -136,7 +136,7 @@ instance FromJSON ConfigSpec where
         csBackups    <- v .: "backups"
         csBackupPath <- v .: "backup-folder"
         csStatePath  <- v .: "state-file"
-        csLogFile    <- v .: "log-file"
+        csLogFile    <- v .:? "log-file"
         return ConfigSpec { .. }
 
 
