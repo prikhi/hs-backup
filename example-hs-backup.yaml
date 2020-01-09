@@ -1,0 +1,26 @@
+---
+
+# The running state of the service - used to persist backups across restarts.
+state-file: /var/run/hs-backup.state
+
+# Set to `null` or comment this line to log to stdout
+log-file: /var/log/hs-backup.log
+
+# The base folder that backups should be put in
+backup-folder: /mnt/Backups
+
+# A list of backups to make
+backups:
+    - name: Personal
+      # Host or domain name of the remote server
+      server: my-server.local
+      # User to SSH into the server as
+      user: myuser
+      # Remote path to backup
+      path: /mnt/Personal/
+      # SSH key to use for password-less logins
+      identity-file: ~/.ssh/id_ecdsa
+      # Make hourly backups (defaults to false if not present)
+      enable-hourly: true
+      # Make yearly backups (defaults to false if not present)
+      enable-yearly: true

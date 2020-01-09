@@ -6,17 +6,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
-{-|
-TODO:
-    * Cleanly handle SIGTERM - persist state, stop backup & child threads
-    * More configuration options:
-        * Backup folder format strings
-        * BackupRate folder names
-        * Maximum backups to retain
-        * Delay time for checking for backups
-    * Log stderr/stdout of command when they error out
 
--}
 module HsBackup
     ( readConfigFile
     , run

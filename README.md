@@ -2,26 +2,68 @@
 
 [![hs-backup Build Status](https://travis-ci.org/prikhi/hs-backup.svg?branch=master)](https://travis-ci.org/prikhi/hs-backup)
 
-A service to backup remote files with interruption handling and archive
-management.
+hs-backup is a service that backups up remote folders using `rsync`.
 
-This will use rsync to backup remote folders on an hourly, daily, monthly, &
-yearly basis.
+* Configured with YAML.
+* Safely handles program restarts, system reboots, and network interruptions -
+  retries a backup until it has completed.
+* Skips enqueuing new backups if syncing takes longer than the backup period.
+* Uses the link destination `rsync` flag to compare files from previous
+  backups, saving bandwidth & disk space.
+* Uses hardlinks to archive backups for longer periods of time, turning hourly
+  backups into daily, monthly, & yearly backups.
+* Automatically culls old backups.
+
+## Build / Install
+
+You can build & install the service using [stack][stack]:
 
 ```
-Haskell service that manages our fileserver backups. It should keep track of
-the backup sources/destinations & existing backups. At certain time it should
-use rsync to make a new backup using the last backup as the link destination.
-It should track in-progress backups, and not start the next one until the
-current is finished. If the network connection fails during a backup, it should
-restart it. If a backup takes longer than a day, it should skip the next backup
-when it is queued. Use `cp -alr` to automatically make monthly & yearly
-backups if enabled for the Backup. Configuration should happen via YAML
-file(location configurable by CLI flag). Program state should be serialized to
-a file & read on startup so that backups can resume after a shutdown. See the
-Workflow & TCache packages for persistence.
+stack install
 ```
+
+This will put the `hs-backup` in your `~/.local/share/` folder.
+
+
+Developers working on `hs-backup`, you will probably want to start a
+file-watching build server:
+
+```
+stack build --pedantic --file-watch --fast
+```
+
+
+## Configuration
+
+By default, `hs-backup` will attempt to read a configuration file from
+`/etc/hs-backup.yaml`. You can use the `--config-file` or `-c` flag to pass a
+custom configuration file to the server.
+
+See the `example-hs-backup.yaml` file in this repository for an example of a
+configuration file as well as documentation on each field.
+
+
+## TODO
+
+While the server is completely usable, there are some improvements we'd like to
+implement:
+
+* Cleanly handle SIGTERM/SIGQUIT
+    * persist current state
+    * stop any running backups & the sync/enqueue child threads
+    * flush log buffer
+* Log stderr/stdout of command when they error out
+* More configuration options:
+    * Backup folder format strings
+    * BackupRate folder names
+    * Maximum backups to retain
+    * Delay time for checking for backups
+    * Delay time for retrying a backup
+
 
 ## License
 
 GPL-3.0+
+
+
+[stack]: https://docs.haskellstack.org/en/stable/README/
