@@ -624,7 +624,7 @@ runRsync backup@Backup {..} time rate = do
             , pure $ T.unpack bUser <> "@" <> T.unpack bServer <> ":" <> bPath
             , pure path
             ]
-    runProcess $ setStdin closed rsync
+    runProcess $ setStdin closed $ setStdout closed rsync
 
 -- | Get the required SSH options for a Backup.
 sshOptions :: Backup -> String
