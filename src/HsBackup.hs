@@ -526,7 +526,7 @@ getLinkDestination
     -> m (Maybe FilePath)
 getLinkDestination backup time rate = do
     parentPath <- getParentPath backup rate
-    let backupFolder = getDateFolder time rate
+    let backupFolder = formatTime defaultTimeLocale (formatString rate) time
     siblings <- liftIO $ filter (/= backupFolder) <$> listDirectory parentPath
     return . listToMaybe . L.reverse $ L.sort siblings
 
