@@ -504,7 +504,8 @@ runRsync backup@Backup {..} time rate = do
             , pure "--delete"
             , (\bwl -> "--bwlimit=" <> show bwl) <$> bBandwidthLimit
             , ("--link-dest=" <>) <$> maybeLinkDest
-            , pure $ "-e '" <> sshOptions backup <> "'"
+            , pure "-e"
+            , pure $ sshOptions backup
             , pure $ T.unpack bUser <> "@" <> T.unpack bServer <> ":" <> bPath
             , pure path
             ]
