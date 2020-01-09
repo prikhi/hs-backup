@@ -57,3 +57,6 @@ executables:
   hs-backup:
     source-dirs: exe
     main: Main.hs
+    dependencies:
+      - hs-backup
+      - cmdargs
