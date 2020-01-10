@@ -561,7 +561,7 @@ deleteOverflow
 deleteOverflow backup rate = do
     parentPath <- getParentPath backup rate
     backups    <- liftIO $ L.sort <$> listDirectory parentPath
-    let lastBackup = listToMaybe backups
+    let lastBackup = (parentPath </>) <$> listToMaybe backups
     when (length backups > maximumBackups rate) $ do
         sequence_ (deletePath <$> lastBackup)
         deleteOverflow backup rate
@@ -633,7 +633,7 @@ getLinkDestination backup time rate = do
     parentPath <- getParentPath backup rate
     let backupFolder = formatTime defaultTimeLocale (formatString rate) time
     siblings <- liftIO $ filter (/= backupFolder) <$> listDirectory parentPath
-    return . listToMaybe . L.reverse $ L.sort siblings
+    return . fmap (parentPath </>) . listToMaybe . L.reverse $ L.sort siblings
 
 -- | Get the parent path for a specific Backup & BackupRate. E.g.,
 -- @/<base-backup-path>/Community/Daily/@.
