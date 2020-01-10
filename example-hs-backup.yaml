@@ -24,3 +24,6 @@ backups:
       enable-hourly: true
       # Make yearly backups (defaults to false if not present)
       enable-yearly: true
+      # Limit the bandwidth (defaults to unlimited if null or not present)
+      # See the `bwlimit` rsync flag for acceptable values
+      bandwidth-limit: 750K
