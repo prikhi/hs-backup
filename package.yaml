@@ -48,7 +48,7 @@ library:
     - lifted-async
     - mtl
     - safe-exceptions
-    - stm
+    - stm >= 2.5
     - text
     - time
     - typed-process
