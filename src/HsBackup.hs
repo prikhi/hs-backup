@@ -382,7 +382,7 @@ data Backup
         -- ^ Enable hourly backups.
         , bEnableYearly :: Bool
         -- ^ Enable yearly backups.
-        , bBandwidthLimit :: Maybe Integer
+        , bBandwidthLimit :: Maybe T.Text
         -- ^ Limit the bandwidth used to make backups.
         } deriving (Show, Read, Eq, Generic, Serialize)
 
@@ -607,7 +607,7 @@ runRsync backup@Backup {..} time rate = do
         rsync = proc "rsync" $ catMaybes
             [ pure "-ahz"
             , pure "--delete"
-            , (\bwl -> "--bwlimit=" <> show bwl) <$> bBandwidthLimit
+            , (\bwl -> "--bwlimit=" <> T.unpack bwl) <$> bBandwidthLimit
             , ("--link-dest=" <>) <$> maybeLinkDest
             , pure "-e"
             , pure $ sshOptions backup

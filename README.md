@@ -48,6 +48,7 @@ configuration file as well as documentation on each field.
 While the server is completely usable, there are some improvements we'd like to
 implement:
 
+* Add ability to exclude paths from rsync backups
 * Cleanly handle SIGTERM/SIGQUIT
     * persist current state
     * stop any running backups & the sync/enqueue child threads
