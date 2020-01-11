@@ -10,6 +10,10 @@ hs-backup is a service that backups up remote folders using `rsync`.
 * Skips enqueuing new backups if syncing takes longer than the backup period.
 * Uses the link destination `rsync` flag to compare files from previous
   backups, saving bandwidth & disk space.
+* Allows limiting of bandwidth usage to prevent network congestion during
+  backup process.
+* Allows ignoring files & directories during backup process using rsync's
+  filter patterns.
 * Uses hardlinks to archive backups for longer periods of time, turning hourly
   backups into daily, monthly, & yearly backups.
 * Automatically culls old backups.
