@@ -384,18 +384,21 @@ data Backup
         -- ^ Enable yearly backups.
         , bBandwidthLimit :: Maybe T.Text
         -- ^ Limit the bandwidth used to make backups.
+        , bExcludePatterns :: [T.Text]
+        -- ^ List of @--exclude@ patterns for rsync.
         } deriving (Show, Read, Eq, Generic, Serialize)
 
 instance FromJSON Backup where
     parseJSON = withObject "Backup" $ \v -> do
-        bName           <- v .: "name"
-        bServer         <- v .: "server"
-        bUser           <- v .: "user"
-        bPath           <- v .: "path"
-        bIdentityFile   <- v .: "identity-file"
-        bEnableHourly   <- fromMaybe False <$> v .:? "hourly"
-        bEnableYearly   <- fromMaybe False <$> v .:? "yearly"
-        bBandwidthLimit <- v .:? "bandwidth-limit"
+        bName            <- v .: "name"
+        bServer          <- v .: "server"
+        bUser            <- v .: "user"
+        bPath            <- v .: "path"
+        bIdentityFile    <- v .: "identity-file"
+        bEnableHourly    <- fromMaybe False <$> v .:? "hourly"
+        bEnableYearly    <- fromMaybe False <$> v .:? "yearly"
+        bBandwidthLimit  <- v .:? "bandwidth-limit"
+        bExcludePatterns <- fromMaybe [] <$> v .:? "exclude"
         return Backup { .. }
 
 
@@ -604,16 +607,25 @@ runRsync backup@Backup {..} time rate = do
     maybeLinkDest <- getLinkDestination backup time rate
     path          <- getBackupPath bName rate time
     let
-        rsync = proc "rsync" $ catMaybes
-            [ pure "-ahz"
-            , pure "--delete"
-            , (\bwl -> "--bwlimit=" <> T.unpack bwl) <$> bBandwidthLimit
-            , ("--link-dest=" <>) <$> maybeLinkDest
-            , pure "-e"
-            , pure $ sshOptions backup
-            , pure $ T.unpack bUser <> "@" <> T.unpack bServer <> ":" <> bPath
-            , pure path
-            ]
+        rsync =
+            proc "rsync"
+                $  catMaybes
+                $  [ pure "-ahz"
+                   , pure "--delete"
+                   , (\bwl -> "--bwlimit=" <> T.unpack bwl) <$> bBandwidthLimit
+                   , ("--link-dest=" <>) <$> maybeLinkDest
+                   ]
+                ++ map Just (getExcludeArguments backup)
+                ++ [ pure "-e"
+                   , pure $ sshOptions backup
+                   , pure
+                   $  T.unpack bUser
+                   <> "@"
+                   <> T.unpack bServer
+                   <> ":"
+                   <> bPath
+                   , pure path
+                   ]
     runProcess $ setStdin closed $ setStdout closed rsync
 
 -- | Get the required SSH options for a Backup.
@@ -634,6 +646,14 @@ getLinkDestination backup time rate = do
     let backupFolder = formatTime defaultTimeLocale (formatString rate) time
     siblings <- liftIO $ filter (/= backupFolder) <$> listDirectory parentPath
     return . fmap (parentPath </>) . listToMaybe . L.reverse $ L.sort siblings
+
+
+-- | Generate the list of @--exclude@ arguments for rsync.
+getExcludeArguments :: Backup -> [String]
+getExcludeArguments Backup { bExcludePatterns } = if null bExcludePatterns
+    then []
+    else map T.unpack $ "--exclude" : L.intersperse "--exclude" bExcludePatterns
+
 
 -- | Get the parent path for a specific Backup & BackupRate. E.g.,
 -- @/<base-backup-path>/Community/Daily/@.

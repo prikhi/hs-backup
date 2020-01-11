@@ -27,3 +27,7 @@ backups:
       # Limit the bandwidth (defaults to unlimited if null or not present)
       # See the `bwlimit` rsync flag for acceptable values
       bandwidth-limit: 750K
+      # Optional list of rsync `--exclude` patterns
+      # See the `FILTER RULES` section of `man 1 rsync` for supported syntax
+      exclude:
+          - Temporary*
