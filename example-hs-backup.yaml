@@ -1,7 +1,7 @@
 ---
 
 # The running state of the service - used to persist backups across restarts.
-state-file: /var/run/hs-backup.state
+state-file: /var/lib/hs-backup/hs-backup.state
 
 # Set to `null` or comment this line to log to stdout
 log-file: /var/log/hs-backup.log
