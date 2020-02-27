@@ -64,4 +64,5 @@ executables:
     ghc-options:
       - -O2
       - -threaded
-      - -with-rtsopts="-N"
+      - -rtsopts
+      - -with-rtsopts=-N
