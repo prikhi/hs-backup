@@ -6,6 +6,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeApplications #-}
 
 module HsBackup
     ( readConfigFile
@@ -18,8 +19,10 @@ where
 
 import           Control.Concurrent             ( threadDelay )
 import           Control.Concurrent.Async.Lifted
-                                                ( async
-                                                , waitBoth
+                                                ( AsyncCancelled
+                                                , async
+                                                , wait
+                                                , cancel
                                                 )
 import           Control.Concurrent.STM         ( TVar
                                                 , atomically
@@ -36,6 +39,7 @@ import           Control.Monad                  ( when
 import           Control.Exception.Safe         ( MonadCatch
                                                 , IOException
                                                 , try
+                                                , tryAsync
                                                 )
 import           Control.Monad.IO.Class         ( MonadIO
                                                 , liftIO
@@ -102,6 +106,13 @@ import           System.Log.FastLogger          ( TimedFastLogger
                                                 , newTimedFastLogger
                                                 , defaultBufSize
                                                 )
+import           System.Posix.Signals           ( Handler(CatchInfo)
+                                                , SignalInfo(siginfoSignal)
+                                                , installHandler
+                                                , sigINT
+                                                , sigQUIT
+                                                , sigTERM
+                                                )
 
 import qualified Data.ByteString               as BS
 import qualified Data.List                     as L
@@ -132,8 +143,6 @@ instance FromJSON ConfigSpec where
 
 -- | Start a thread that enqueues new Backups and a thread that processes
 -- the queue by syncing the backups.
---
--- Read config file instead of passing as args
 run :: ConfigSpec -> IO ()
 run spec@ConfigSpec { csBackups, csBackupPath, csStatePath } = do
     (logger, cleanupLogger) <- makeLogger
@@ -143,8 +152,9 @@ run spec@ConfigSpec { csBackups, csBackupPath, csStatePath } = do
     let cfg = Config csBackups csBackupPath statePath state logger
     syncer   <- async $ runReaderT syncBackups cfg
     enqueuer <- async $ runReaderT enqueueBackups cfg
-    void $ waitBoth syncer enqueuer
-    cleanupLogger
+    setupSignalHandlers cfg cleanupLogger syncer enqueuer
+    void . tryAsync @IO @AsyncCancelled $ wait enqueuer
+    void . tryAsync @IO @AsyncCancelled $ wait syncer
   where
     -- Build the application logger. If no path exists in the
     -- configuration, log to stdout. If the path exists but we cannot write
@@ -203,6 +213,21 @@ run spec@ConfigSpec { csBackups, csBackupPath, csStatePath } = do
         if exists
             then getPermissions filePath
             else getFilePermissions $ takeDirectory filePath
+    -- Cancel the threads, persist the state, and flush the log buffer when
+    -- receiving a SIGQUIT, SIGINT, or SIGTERM signal.
+    setupSignalHandlers cfg cleanupLogger syncer enqueuer =
+        let cleanup = CatchInfo $ \info -> do
+                cfgLogger cfg
+                    $  logMsg_
+                    $  "Caught Signal "
+                    <> toLogStr (show $ siginfoSignal info)
+                    <> ", Shutting Down."
+                cancel enqueuer
+                void $ runReaderT (updateState id) cfg
+                void cleanupLogger
+                cancel syncer
+        in  mapM_ (\s -> installHandler s cleanup Nothing)
+                  [sigQUIT, sigTERM, sigINT]
 
 
 -- | The configuration environment used by the enqueuing & syncing threads.

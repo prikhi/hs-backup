@@ -52,10 +52,6 @@ configuration file as well as documentation on each field.
 While the server is completely usable, there are some improvements we'd like to
 implement:
 
-* Cleanly handle SIGTERM/SIGQUIT
-    * persist current state
-    * stop any running backups & the sync/enqueue child threads
-    * flush log buffer
 * Log stderr/stdout of command when they error out
 * More configuration options:
     * Backup folder format strings
