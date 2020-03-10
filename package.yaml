@@ -4,8 +4,8 @@ name:
   hs-backup
 version:
   0.1.0.0
-# synopsis:
-# description:
+github:
+  prikhi/hs-backup
 homepage:
   https://github.com/prikhi/hs-backup#readme
 license:
@@ -17,11 +17,30 @@ maintainer:
 copyright:
   2019 Pavan Rikhi
 category:
-  Web
-
+  Backup
 extra-source-files:
   - README.md
+  - CHANGELOG.md
   - LICENSE
+
+
+synopsis: Robust Backup Server for Resumeable, Archived Network Backups
+description: >
+    @hs-backup@ is a CLI backup server that leverages @rsync@ & @cp@ to make
+    backups of network folders over SSH. It is fault-tolerant and will persist
+    it's internal state so that backups are resumeable through network outages
+    and system/service restarts.
+
+    Backups are made with hourly, daily, monthly, and yearly frequencies. Data
+    is de-duplicated by using the @link-dest@ rsync flag and hard-links for
+    archives. The number of archived backups is automatically trimmed.
+
+    @hs-backup@ is configured using a YAML file. By default, it attempts to
+    load the configuration from @/etc/hs-backup.yaml@ but the @-c@ flag can be
+    used to point the server to a different config location. There is an
+    <https://github.com/prikhi/hs-backup/blob/master/example-hs-backup.yaml example configuration file>
+    in the project's source repository.
+
 
 ghc-options:
   - -Wall
