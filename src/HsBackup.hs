@@ -75,11 +75,17 @@ import           Data.Yaml.Config               ( loadYamlSettings
                                                 , ignoreEnv
                                                 )
 import           GHC.Generics                   ( Generic )
-import           System.Process.Typed           ( proc
+import           System.Process.Typed           ( ProcessConfig
+                                                , proc
                                                 , setStdin
                                                 , setStdout
-                                                , runProcess
+                                                , setStderr
+                                                , getStdout
+                                                , getStderr
                                                 , closed
+                                                , createPipe
+                                                , startProcess
+                                                , waitExitCode
                                                 )
 import           System.Directory               ( listDirectory
                                                 , removePathForcibly
@@ -95,6 +101,10 @@ import           System.Directory               ( listDirectory
 import           System.Exit                    ( ExitCode(..) )
 import           System.FilePath.Posix          ( (</>)
                                                 , takeDirectory
+                                                )
+import           System.IO                      ( Handle
+                                                , hGetLine
+                                                , hIsEOF
                                                 )
 import           System.Log.FastLogger          ( TimedFastLogger
                                                 , LogStr
@@ -578,9 +588,9 @@ runBackup backup time rate = try $ do
 
 -- | Set the modified time of a path to now by running the @touch@ command
 -- on it.
-updateModifiedTime :: MonadIO m => FilePath -> m ExitCode
-updateModifiedTime path =
-    let touch = proc "touch" [path] in runProcess $ setStdin closed touch
+updateModifiedTime
+    :: (MonadReader Config m, MonadIO m) => FilePath -> m ExitCode
+updateModifiedTime path = runAndLogProcess "touch" $ proc "touch" [path]
 
 -- | Delete older backups if the retention count for the BackupRate is
 -- exceeded.
@@ -615,7 +625,7 @@ runCp
 runCp sourceDirectory Backup {..} time rate = do
     backupDestination <- getBackupPath bName rate time
     let cp = proc "cp" ["-al", sourceDirectory, backupDestination]
-    runProcess $ setStdin closed cp
+    runAndLogProcess "cp" cp
 
 
 -- | Make a backup using the @rsync@ command.
@@ -651,7 +661,7 @@ runRsync backup@Backup {..} time rate = do
                    <> bPath
                    , pure path
                    ]
-    runProcess $ setStdin closed $ setStdout closed rsync
+    runAndLogProcess "rsync" rsync
 
 -- | Get the required SSH options for a Backup.
 sshOptions :: Backup -> String
@@ -678,6 +688,37 @@ getExcludeArguments :: Backup -> [String]
 getExcludeArguments Backup { bExcludePatterns } = if null bExcludePatterns
     then []
     else map T.unpack $ "--exclude" : L.intersperse "--exclude" bExcludePatterns
+
+
+-- | Run a process, log the stdout & stderr, and return the exit code.
+runAndLogProcess
+    :: (MonadReader Config m, MonadIO m)
+    => String
+    -> ProcessConfig a b c
+    -> m ExitCode
+runAndLogProcess cmd procCfg = do
+    logger  <- asks cfgLogger
+    process <- startProcess $ setStdin closed $ setStdout createPipe $ setStderr
+        createPipe
+        procCfg
+    stdoutLogger <- liftIO . async $ handleLogger logger "stdout" $ getStdout
+        process
+    stderrLogger <- liftIO . async $ handleLogger logger "stderr" $ getStderr
+        process
+    exitCode <- waitExitCode process
+    mapM_ (liftIO . cancel) [stdoutLogger, stderrLogger]
+    return exitCode
+  where
+    handleLogger :: TimedFastLogger -> String -> Handle -> IO ()
+    handleLogger logger typ handle = do
+        eof <- hIsEOF handle
+        if eof
+            then return ()
+            else do
+                line <- hGetLine handle
+                logger . logMsg_ . toLogStr $ concat
+                    ["[", cmd, "][", typ, "]: ", line]
+                handleLogger logger typ handle
 
 
 -- | Get the parent path for a specific Backup & BackupRate. E.g.,
